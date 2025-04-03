@@ -1,3 +1,5 @@
+// fetch both active and deactivated owners
+
 function fetchHubSpotUsers() {
   const SHEET_NAME = "hs_users";
   const HUBSPOT_API_URL = "https://api.hubapi.com/crm/v3/owners/";
@@ -7,7 +9,7 @@ function fetchHubSpotUsers() {
   // Retrieve Access Token from PropertiesService
   const HUBSPOT_ACCESS_TOKEN = PropertiesService.getScriptProperties().getProperty("HUBSPOT_API_KEY");
   if (!HUBSPOT_ACCESS_TOKEN) {
-    throw new Error("HubSpot access token not found in PropertiesService. Please set it using the `setHubSpotAccessToken` function.");
+    throw new Error("HubSpot access token not found in PropertiesService. Please set it using the `setHubSpotApiKey` function.");
   }
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
@@ -20,18 +22,39 @@ function fetchHubSpotUsers() {
   const headers = ['id', 'Full Name'];
   sheet.appendRow(headers);
 
+  // Fetch both active and deactivated owners
+  const activeOwners = fetchOwners(HUBSPOT_API_URL, HUBSPOT_ACCESS_TOKEN, PROPERTIES, LIMIT, false);
+  const deactivatedOwners = fetchOwners(HUBSPOT_API_URL, HUBSPOT_ACCESS_TOKEN, PROPERTIES, LIMIT, true);
+  
+  // Combine the two arrays
+  const owners = activeOwners.concat(deactivatedOwners);
+
+  // Map the owner objects to rows for the sheet
+  const rows = owners.map(owner => [
+    owner.id,
+    (owner.firstName || '') + ' ' + (owner.lastName || '')
+  ]);
+
+  // Write data to the sheet if there are any rows
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  }
+
+  Logger.log(`Fetched ${owners.length} owners (active and deactivated) from HubSpot and added to '${SHEET_NAME}'`);
+}
+
+function fetchOwners(apiUrl, accessToken, properties, limit, archived) {
   let after = null; // For pagination
   let owners = [];
   let hasMore = true;
 
-  // Fetch data from HubSpot
   while (hasMore) {
-    const url = `${HUBSPOT_API_URL}?limit=${LIMIT}&properties=${PROPERTIES.join(",")}` + 
+    const url = `${apiUrl}?limit=${limit}&archived=${archived}&properties=${properties.join(",")}` + 
                 (after ? `&after=${after}` : "");
     const options = {
       method: "get",
       headers: {
-        "Authorization": `Bearer ${HUBSPOT_ACCESS_TOKEN}`,
+        "Authorization": `Bearer ${accessToken}`,
         "Content-Type": "application/json"
       },
       muteHttpExceptions: true
@@ -47,23 +70,8 @@ function fetchHubSpotUsers() {
     hasMore = data.paging && data.paging.next && data.paging.next.after;
     after = hasMore ? data.paging.next.after : null;
   }
- 
-  // Parse and write data to the sheet
-  const rows = owners.map(owners => [
-    owners.id,
-    (owners.firstName || '') + ' ' + (owners.lastName || '')
-  ]);
-  Logger.log(rows);
-
-
-  // Append data rows to the sheet
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  }
-
-  owners.forEach(row => console.log(row));
-  Logger.log(`Fetched ${owners.length} owners from HubSpot and added to '${SHEET_NAME}'`);
-
+  
+  return owners;
 }
 
 
